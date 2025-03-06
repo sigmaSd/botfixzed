@@ -40,6 +40,10 @@ console.log(`Using GitHub username: ${username}`);
 for (const repo of repos) {
   console.log(`Processing repo: ${JSON.stringify(repo)}`);
   await fetchRepo(repo.repo);
+  if (existsSync(`${repo.name}/extension.toml`)) {
+    console.log("Skipping existing extension.toml");
+    continue;
+  }
   portExtToToml(repo.name);
   await openPR(repo);
   // Uncomment to process only the first repo
@@ -51,10 +55,6 @@ async function fetchRepo(repo: string) {
 }
 
 function portExtToToml(path: string) {
-  if (existsSync(`${path}/extension.toml`)) {
-    console.log("Skipping existing extension.toml");
-    return;
-  }
   const jsonConfig = JSON.parse(
     Deno.readTextFileSync(`${path}/extension.json`),
   );
@@ -65,12 +65,12 @@ function portExtToToml(path: string) {
   jsonConfig.schema_version = 1;
 
   let tomlConfig = stringifyToml(jsonConfig);
-  const maybeRepo = findRepoConfig(path);
-  if (maybeRepo) {
-    tomlConfig += `grammar = "${maybeRepo.name}"`;
+  const maybeRepoConfig = findRepoConfig(path);
+  if (maybeRepoConfig) {
+    tomlConfig += `grammar = "${maybeRepoConfig.name}"`;
     tomlConfig += `
-[grammars.${maybeRepo.name}]
-${maybeRepo.content}`;
+[grammars.${maybeRepoConfig.name}]
+${maybeRepoConfig.content}`;
   }
 
   console.log(tomlConfig);
