@@ -41,7 +41,7 @@ for (const repo of repos) {
   console.log(`Processing repo: ${JSON.stringify(repo)}`);
   await fetchRepo(repo.repo);
   portExtToToml(repo.name);
-  // await openPR(repo);
+  await openPR(repo);
   // Uncomment to process only the first repo
   break;
 }
