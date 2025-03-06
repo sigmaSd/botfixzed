@@ -141,6 +141,18 @@ async function openPR(
     return;
   }
 
+  // Fork the repository *before* any git operations
+  await run(["gh", "repo", "fork", `${user}/${name}`, "--remote=false"]); // --remote=false is important here!
+
+  // Add a remote for *your* fork
+  await run([
+    "git",
+    "remote",
+    "add",
+    "fork",
+    `https://github.com/${username}/${name}.git`,
+  ]);
+
   // Create a new branch
   await run(["git", "checkout", "-b", branchName]);
 
@@ -154,11 +166,8 @@ async function openPR(
     return;
   }
 
-  // Fork the repository using gh cli
-  await run(["gh", "repo", "fork", `${user}/${name}`, "--remote=true"]);
-
-  // Push to the fork
-  await run(["git", "push", "-u", "origin", branchName]);
+  // Push to the *fork* remote
+  await run(["git", "push", "-u", "fork", branchName]);
 
   // Create a PR using gh cli
   await run([
@@ -169,11 +178,10 @@ async function openPR(
     "Add extension.toml",
     "--body",
     `This PR adds 'extension.toml' file, converting from the existing 'extension.json' configuration.
-    See https://github.com/zed-industries/extensions/issues/2104
+See https://github.com/zed-industries/extensions/issues/2104
 
-    This change was generated automatically and needs to be manually tested.
-    Bot script: https://github.com/sigmaSd/botfixzed/blob/master/bot.ts
-    `,
+This change was generated automatically and needs to be manually tested.
+Bot script: https://github.com/sigmaSd/botfixzed/blob/master/bot.ts`,
     "--repo",
     `${user}/${name}`,
   ]);
