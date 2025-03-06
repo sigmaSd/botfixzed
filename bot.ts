@@ -44,14 +44,48 @@ for (const repo of repos) {
     console.log("Skipping existing extension.toml");
     continue;
   }
+
+  // This is neeed to handle repo renaming
+  // Get the *current* repository name using gh repo view
+  try {
+    const repoInfo = await getCurrentRepoInfo(repo.user, repo.name);
+    // Update the repo object with the CORRECTED name
+    repo.user = repoInfo.owner;
+    repo.name = repoInfo.name;
+  } catch (error) {
+    console.error(
+      `Error getting current repo info for ${repo.user}/${repo.name}:`,
+      error,
+    );
+    continue; // Skip to the next repository if we can't get info
+  }
+
   portExtToToml(repo.name);
   await openPR(repo);
   // Uncomment to process only the first repo
-  break;
+  // break;
 }
 
 async function fetchRepo(repo: string) {
   await run(["gh", "repo", "clone", repo]);
+}
+
+async function getCurrentRepoInfo(user: string, name: string) {
+  const { stdout, success } = await run([
+    "gh",
+    "repo",
+    "view",
+    `${user}/${name}`,
+    "--json",
+    "name,owner",
+  ]);
+
+  if (!success) {
+    throw new Error(`Failed to get repo info for ${user}/${name}`);
+  }
+
+  const repoData = JSON.parse(stdout);
+  return { owner: repoData.owner.login, name: repoData.name };
 }
 
 function portExtToToml(path: string) {
@@ -170,7 +204,7 @@ async function openPR(
   await run(["git", "push", "-u", "fork", branchName]);
 
   // Create a PR using gh cli
-  await run([
+  const prResult = await run([
     "gh",
     "pr",
     "create",
@@ -185,6 +219,11 @@ Bot script: https://github.com/sigmaSd/botfixzed/blob/master/bot.ts`,
     "--repo",
     `${user}/${name}`,
   ]);
+
+  if (prResult.success) {
+    const prUrl = prResult.stdout.trim().split("\n")[0];
+    console.log(`Pull request created: ${prUrl}`);
+  }
 
   // Return to the temp directory
   Deno.chdir(tempDir);
