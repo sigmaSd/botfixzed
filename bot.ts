@@ -1,7 +1,13 @@
 import assert from "node:assert";
+import { existsSync } from "node:fs";
 import { stringify as stringifyToml } from "jsr:@std/toml@1.0.2";
 import { DOMParser } from "jsr:@b-fuze/deno-dom@0.1.49";
-import { existsSync } from "node:fs";
+import {
+  format as formatSemVer,
+  increment as incrementSemVer,
+  parse as parseSemVer,
+} from "jsr:@std/semver@1.0.4";
+import * as cases from "jsr:@luca/cases@1";
 
 const issue2104 = await fetch(
   "https://github.com/zed-industries/extensions/issues/2104",
@@ -26,17 +32,22 @@ const repos = [...links]
 const tempDir = Deno.makeTempDirSync();
 console.log("Patching repos in:", tempDir);
 Deno.chdir(tempDir);
+
+// Get GitHub username
+const username = await getGitHubUsername();
+console.log(`Using GitHub username: ${username}`);
+
 for (const repo of repos) {
   console.log(`Processing repo: ${JSON.stringify(repo)}`);
   await fetchRepo(repo.repo);
   portExtToToml(repo.name);
-  openPR(repo);
-  // break;
-  // openPR({repo,path})
+  // await openPR(repo);
+  // Uncomment to process only the first repo
+  break;
 }
 
 async function fetchRepo(repo: string) {
-  await run(["git", "clone", repo]);
+  await run(["gh", "repo", "clone", repo]);
 }
 
 function portExtToToml(path: string) {
@@ -47,9 +58,16 @@ function portExtToToml(path: string) {
   const jsonConfig = JSON.parse(
     Deno.readTextFileSync(`${path}/extension.json`),
   );
+  jsonConfig.id = cases.kebabCase(jsonConfig.name);
+  jsonConfig.version = formatSemVer(
+    incrementSemVer(parseSemVer(jsonConfig.version), "patch"),
+  );
+  jsonConfig.schema_version = 1;
+
   let tomlConfig = stringifyToml(jsonConfig);
   const maybeRepo = findRepoConfig(path);
   if (maybeRepo) {
+    tomlConfig += `grammar = "${maybeRepo.name}"`;
     tomlConfig += `
 [grammars.${maybeRepo.name}]
 ${maybeRepo.content}`;
@@ -69,20 +87,96 @@ function findRepoConfig(path: string) {
   }
 }
 
-async function run(cmd: string[]) {
-  const process = new Deno.Command(cmd[0], { args: cmd.slice(1) });
-  const status = await process.spawn().status;
-  return status;
+async function run(cmd: string[], options = {}) {
+  console.log(`Running: ${cmd.join(" ")}`);
+  const process = new Deno.Command(cmd[0], {
+    args: cmd.slice(1),
+    ...options,
+  });
+  const { stdout, stderr, success } = await process.output();
+
+  if (!success) {
+    console.error("Command failed:");
+    console.error(new TextDecoder().decode(stderr));
+  }
+
+  return {
+    success,
+    stdout: new TextDecoder().decode(stdout),
+    stderr: new TextDecoder().decode(stderr),
+  };
 }
 
-function openPR(
-  { repo, user, name }: { repo: string; user: string; name: string },
+async function getGitHubUsername() {
+  // Get current user from gh cli
+  const { stdout, success } = await run([
+    "gh",
+    "api",
+    "user",
+    "--jq",
+    ".login",
+  ]);
+
+  if (!success) {
+    throw new Error("Failed to get GitHub username");
+  }
+
+  return stdout.trim();
+}
+
+async function openPR(
+  { user, name }: { repo: string; user: string; name: string },
 ) {
   console.log(`Opening PR for ${name}`);
 
-  forkRepo({ user, name });
-}
+  // Create a branch name
+  const branchName = `add-extension-toml-${Date.now()}`;
 
-function forkRepo({ user, name }: { user: string; name: string }) {
-  throw new Error("Function not implemented.");
+  // Change directory to the cloned repo
+  Deno.chdir(`${tempDir}/${name}`);
+
+  // Check if changes need to be made
+  if (!existsSync("extension.toml")) {
+    console.log("No extension.toml was created. Skipping PR creation.");
+    return;
+  }
+
+  // Create a new branch
+  await run(["git", "checkout", "-b", branchName]);
+
+  // Add the new file
+  await run(["git", "add", "extension.toml"]);
+
+  // Commit the changes
+  const commitResult = await run(["git", "commit", "-m", "Add extension.toml"]);
+  if (!commitResult.success) {
+    console.log("Nothing to commit, skipping PR creation");
+    return;
+  }
+
+  // Fork the repository using gh cli
+  await run(["gh", "repo", "fork", `${user}/${name}`, "--remote=true"]);
+
+  // Push to the fork
+  await run(["git", "push", "-u", "origin", branchName]);
+
+  // Create a PR using gh cli
+  await run([
+    "gh",
+    "pr",
+    "create",
+    "--title",
+    "Add extension.toml",
+    "--body",
+    `This PR adds 'extension.toml' file, converting from the existing 'extension.json' configuration.
+    See https://github.com/zed-industries/extensions/issues/2104
+
+    This change was generated automatically and needs to be manually tested.
+    `,
+    "--repo",
+    `${user}/${name}`,
+  ]);
+
+  // Return to the temp directory
+  Deno.chdir(tempDir);
 }
