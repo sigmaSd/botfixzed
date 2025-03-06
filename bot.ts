@@ -28,7 +28,6 @@ const repos = [...links]
     const [user, name] = repo.split("/").slice(-2);
     return { repo, user, name };
   });
-
 const tempDir = Deno.makeTempDirSync();
 console.log("Patching repos in:", tempDir);
 Deno.chdir(tempDir);
@@ -39,11 +38,6 @@ console.log(`Using GitHub username: ${username}`);
 
 for (const repo of repos) {
   console.log(`Processing repo: ${JSON.stringify(repo)}`);
-  await fetchRepo(repo.repo);
-  if (existsSync(`${repo.name}/extension.toml`)) {
-    console.log("Skipping existing extension.toml");
-    continue;
-  }
 
   // This is neeed to handle repo renaming
   // Get the *current* repository name using gh repo view
@@ -58,6 +52,18 @@ for (const repo of repos) {
       error,
     );
     continue; // Skip to the next repository if we can't get info
+  }
+
+  // Check for existing PRs *before* cloning or doing any work
+  if (await hasOpenPR(repo.user, repo.name, username)) {
+    console.log(`Skipping ${repo.user}/${repo.name}: Existing PR found`);
+    continue;
+  }
+
+  await fetchRepo(repo.repo);
+  if (existsSync(`${repo.name}/extension.toml`)) {
+    console.log("Skipping existing extension.toml");
+    continue;
   }
 
   portExtToToml(repo.name);
@@ -227,4 +233,30 @@ Bot script: https://github.com/sigmaSd/botfixzed/blob/master/bot.ts`,
 
   // Return to the temp directory
   Deno.chdir(tempDir);
+}
+
+async function hasOpenPR(
+  user: string,
+  repo: string,
+  username: string,
+): Promise<boolean> {
+  const { stdout, success } = await run([
+    "gh",
+    "pr",
+    "list",
+    "--repo",
+    `${user}/${repo}`,
+    "--author",
+    username,
+    "--json",
+    "number",
+  ]);
+
+  if (!success) {
+    console.error(`Failed to check for open PRs for ${user}/${repo}`);
+    return false; // Assume no PR if check fails
+  }
+
+  const prs = JSON.parse(stdout);
+  return prs.length > 0;
 }
