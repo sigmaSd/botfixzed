@@ -1,6 +1,9 @@
 import assert from "node:assert";
 import { existsSync } from "node:fs";
-import { stringify as stringifyToml } from "jsr:@std/toml@1.0.2";
+import {
+  parse as parseToml,
+  stringify as stringifyToml,
+} from "jsr:@std/toml@1.0.2";
 import { DOMParser } from "jsr:@b-fuze/deno-dom@0.1.49";
 import {
   format as formatSemVer,
@@ -55,19 +58,23 @@ for (const repo of repos) {
   }
 
   // Check for existing PRs *before* cloning or doing any work
-  if (await hasOpenPR(repo.user, repo.name, username)) {
-    console.log(`Skipping ${repo.user}/${repo.name}: Existing PR found`);
-    continue;
-  }
+  const existingPR = await getExistingPR(repo.user, repo.name, username);
 
   await fetchRepo(repo.repo);
-  if (existsSync(`${repo.name}/extension.toml`)) {
+
+  if (existingPR) {
+    console.log(
+      `Found existing PR for ${repo.user}/${repo.name}: updating it...`,
+    );
+    // await updateExistingPRRemoveJsonConfig(repo, existingPR, username);
+    await updateCleanup(repo, existingPR, username);
+  } else if (existsSync(`${repo.name}/extension.toml`)) {
     console.log("Skipping existing extension.toml");
     continue;
+  } else {
+    portExtToToml(repo.name);
+    await openPR(repo);
   }
-
-  portExtToToml(repo.name);
-  await openPR(repo);
   // Uncomment to process only the first repo
   // break;
 }
@@ -235,11 +242,11 @@ Bot script: https://github.com/sigmaSd/botfixzed/blob/master/bot.ts`,
   Deno.chdir(tempDir);
 }
 
-async function hasOpenPR(
+async function getExistingPR(
   user: string,
   repo: string,
   username: string,
-): Promise<boolean> {
+): Promise<string | null> {
   const { stdout, success } = await run([
     "gh",
     "pr",
@@ -249,14 +256,170 @@ async function hasOpenPR(
     "--author",
     username,
     "--json",
-    "number",
+    "number,headRefName",
   ]);
 
   if (!success) {
     console.error(`Failed to check for open PRs for ${user}/${repo}`);
-    return false; // Assume no PR if check fails
+    return null;
   }
 
   const prs = JSON.parse(stdout);
-  return prs.length > 0;
+  if (prs.length === 0) return null;
+
+  // Return the branch name for the existing PR
+  return prs[0].headRefName;
+}
+
+// https://github.com/zed-industries/extensions/issues/2104#issuecomment-2707475876
+async function updateExistingPRRemoveJsonConfig(
+  { user, name }: { repo: string; user: string; name: string },
+  branchName: string,
+  username: string,
+) {
+  console.log(`Updating PR for ${name} to remove extension.json`);
+
+  // Change directory to the cloned repo
+  Deno.chdir(`${tempDir}/${name}`);
+
+  // Check if extension.json exists
+  if (!existsSync("extension.json")) {
+    console.log("extension.json doesn't exist. No need to update PR.");
+    Deno.chdir(tempDir);
+    return;
+  }
+
+  // Add a remote for your fork
+  await run([
+    "git",
+    "remote",
+    "add",
+    "fork",
+    `https://github.com/${username}/${name}.git`,
+  ]);
+
+  // Fetch from the fork to get the branch
+  await run(["git", "fetch", "fork"]);
+
+  // Checkout the existing branch
+  await run(["git", "checkout", `fork/${branchName}`]);
+  await run(["git", "checkout", "-b", branchName]);
+
+  // Remove extension.json
+  await run(["git", "rm", "extension.json"]);
+
+  // Commit the changes
+  const commitResult = await run([
+    "git",
+    "commit",
+    "-m",
+    "Remove extension.json",
+  ]);
+
+  if (!commitResult.success) {
+    console.log("Nothing to commit, skipping PR update");
+    return;
+  }
+
+  // Push to the fork remote
+  await run(["git", "push", "fork", branchName]);
+
+  console.log(`Updated PR branch for ${user}/${name}`);
+
+  // Return to temp directory
+  Deno.chdir(tempDir);
+}
+
+async function updateCleanup(
+  { user, name }: { repo: string; user: string; name: string },
+  branchName: string,
+  username: string,
+) {
+  console.log(`Updating PR for ${name} to update toml and remove grammar`);
+
+  // Change directory to the cloned repo
+  Deno.chdir(`${tempDir}/${name}`);
+
+  // Add a remote for your fork
+  await run([
+    "git",
+    "remote",
+    "add",
+    "fork",
+    `https://github.com/${username}/${name}.git`,
+  ]);
+
+  // Fetch from the fork to get the branch
+  await run(["git", "fetch", "fork"]);
+
+  // Checkout the existing branch
+  await run(["git", "checkout", `fork/${branchName}`]);
+  await run(["git", "checkout", "-b", branchName]);
+
+  // seems like earlier I created a corrupt toml by having
+  // [grammars] alongside [grammars.matlab]
+  // the issue we can't even parse it to fix it
+  // the workaround is simple, string replacement
+  let tomlFile = await Deno.readTextFile("extension.toml");
+  tomlFile = tomlFile.replace("[grammars]", "[grammarsDELETE]");
+
+  const tomlConfig = parseToml(tomlFile);
+  // 1. remove grammar = type
+  delete tomlConfig.grammar;
+  // 2. remove [grammar]
+  delete tomlConfig.grammarsDELETE;
+  // 3. remove [languages]
+  delete tomlConfig.languages;
+
+  // 4. remove grammars folder
+  {
+    try {
+      await Deno.remove("grammars", { recursive: true });
+    } catch { /* ignore */ }
+  }
+
+  // Not all repos need this, lets just ignore the gitignore
+  // 5. setup gitignore
+  // {
+  //   let gitIgnoreContent = "";
+  //   try {
+  //     gitIgnoreContent = await Deno.readTextFile(".gitignore");
+  //   } catch { /* ignore */ }
+  //   const gitignore = await Deno.open(".gitignore", {
+  //     append: true,
+  //     create: true,
+  //   });
+  //   if (!gitIgnoreContent.includes("grammars")) {
+  //     await gitignore.write(new TextEncoder().encode("grammars\n"));
+  //   }
+  //   if (!gitIgnoreContent.includes("*.wasm")) {
+  //     await gitignore.write(new TextEncoder().encode("*.wasm\n"));
+  //   }
+  // }
+
+  await Deno.writeTextFile("extension.toml", stringifyToml(tomlConfig));
+  console.log("new", Deno.readTextFileSync("extension.toml"));
+
+  // Commit the changes
+  await run(["git", "add", "."]);
+  const commitResult = await run([
+    "git",
+    "commit",
+    "-m",
+    "cleanup",
+  ]);
+
+  if (!commitResult.success) {
+    console.log("Nothing to commit, skipping PR update");
+    Deno.chdir(tempDir);
+    return;
+  }
+
+  // Push to the fork remote
+  await run(["git", "push", "fork", branchName]);
+
+  console.log(`Updated PR branch for ${user}/${name}`);
+
+  // Return to temp directory
+  Deno.chdir(tempDir);
 }
