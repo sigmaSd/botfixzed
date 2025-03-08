@@ -228,7 +228,7 @@ async function openPR(
 See https://github.com/zed-industries/extensions/issues/2104
 
 This change was generated automatically and needs to be manually tested.
-Bot script: https://github.com/sigmaSd/botfixzed/blob/master/bot.ts`,
+Bot script: https://github.com/sigmaSd/botfixzed/blob/master/bot2104.ts`,
     "--repo",
     `${user}/${name}`,
   ]);
