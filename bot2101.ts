@@ -122,6 +122,7 @@ function patchScrollbarThumbBg(repo: string) {
   }
   let theme = Deno.readTextFileSync(themePath);
   if (!theme.includes("scrollbar_thumb.background")) {
+    Deno.chdir(tempDir);
     return false;
   }
   theme = theme.replaceAll(
@@ -221,6 +222,7 @@ async function openPR(
   ]);
   if (!commitResult.success) {
     console.log("Nothing to commit, skipping PR creation");
+    Deno.chdir(tempDir);
     return;
   }
 
