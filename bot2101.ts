@@ -36,14 +36,19 @@ const username = await getGitHubUsername();
 console.log(`Using GitHub username: ${username}`);
 
 let index = 0;
-for (let repo of repos.slice(2)) {
+for (let repo of repos.slice(10)) {
   console.log(`[${index++}] Processing repo: ${JSON.stringify(repo)}`);
   await tryUtilUserAction(async () => {
     // This is needed to handle repo renaming
     repo = await correctRepoInfo(repo);
+    if (await getExistingPR(repo.user, repo.name, username) !== null) {
+      console.log(
+        `Skipping repo ${repo.user}/${repo.name} as PR already exists`,
+      );
+      return;
+    }
 
     await fetchRepo(repo.repo);
-
     const changed = patchScrollbarThumbBg(repo.name);
     if (changed) {
       bumpVersion(repo.name);
@@ -64,7 +69,7 @@ async function getCurrentRepoInfo(user: string, name: string) {
     "gh",
     "repo",
     "view",
-    `${user}/${name.replace(/.git$/, "")}`,
+    `${user}/${name}`,
     "--json",
     "name,owner",
   ]);
@@ -271,11 +276,43 @@ async function correctRepoInfo(
   repo: { repo: string; user: string; name: string },
 ) {
   // Get the *current* repository name using gh repo view
-  const repoInfo = await getCurrentRepoInfo(repo.user, repo.name);
+  const repoInfo = await getCurrentRepoInfo(
+    repo.user,
+    repo.name.replace(/\.git$/, ""), /* github strips .git */
+  );
   return {
     repo: repo.repo,
     user: repoInfo.owner,
     // Update the repo object with the CORRECTED name
     name: repoInfo.name,
   };
+}
+
+async function getExistingPR(
+  user: string,
+  repo: string,
+  username: string,
+): Promise<string | null> {
+  const { stdout, success } = await run([
+    "gh",
+    "pr",
+    "list",
+    "--repo",
+    `${user}/${repo}`,
+    "--author",
+    username,
+    "--json",
+    "number,headRefName",
+  ]);
+
+  if (!success) {
+    console.error(`Failed to check for open PRs for ${user}/${repo}`);
+    return null;
+  }
+
+  const prs = JSON.parse(stdout);
+  if (prs.length === 0) return null;
+
+  // Return the branch name for the existing PR
+  return prs[0].headRefName;
 }
