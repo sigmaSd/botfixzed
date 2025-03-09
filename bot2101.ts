@@ -27,16 +27,14 @@ const repos = [...links]
     const [user, name] = repo.split("/").slice(-2);
     return { repo, user, name };
   });
-const tempDir = Deno.makeTempDirSync();
-console.log("Patching repos in:", tempDir);
+const tempDir = createWorkDir();
 Deno.chdir(tempDir);
 
 // Get GitHub username
 const username = await getGitHubUsername();
 console.log(`Using GitHub username: ${username}`);
 
-let index = 0;
-for (let repo of repos.slice(10)) {
+for (let [index, repo] of repos.entries()) {
   console.log(`[${index++}] Processing repo: ${JSON.stringify(repo)}`);
   await tryUtilUserAction(async () => {
     // This is needed to handle repo renaming
@@ -53,6 +51,10 @@ for (let repo of repos.slice(10)) {
     if (changed) {
       bumpVersion(repo.name);
       await openPR(repo);
+    } else {
+      console.log(
+        `Skipping repo ${repo.user}/${repo.name} as there is no changes`,
+      );
     }
   });
 
@@ -315,4 +317,13 @@ async function getExistingPR(
 
   // Return the branch name for the existing PR
   return prs[0].headRefName;
+}
+
+function createWorkDir() {
+  const path = `${Deno.cwd()}/work`;
+  try {
+    Deno.removeSync(path, { recursive: true });
+  } catch { /* ignore */ }
+  Deno.mkdirSync(path);
+  return path;
 }

@@ -31,8 +31,7 @@ const repos = [...links]
     const [user, name] = repo.split("/").slice(-2);
     return { repo, user, name };
   });
-const tempDir = Deno.makeTempDirSync();
-console.log("Patching repos in:", tempDir);
+const tempDir = createWorkDir();
 Deno.chdir(tempDir);
 
 // Get GitHub username
@@ -272,7 +271,7 @@ async function getExistingPR(
 }
 
 // https://github.com/zed-industries/extensions/issues/2104#issuecomment-2707475876
-async function updateExistingPRRemoveJsonConfig(
+async function _updateExistingPRRemoveJsonConfig(
   { user, name }: { repo: string; user: string; name: string },
   branchName: string,
   username: string,
@@ -422,4 +421,13 @@ async function updateCleanup(
 
   // Return to temp directory
   Deno.chdir(tempDir);
+}
+
+function createWorkDir() {
+  const path = "./work";
+  try {
+    Deno.removeSync(path, { recursive: true });
+  } catch { /* ignore */ }
+  Deno.mkdirSync(path);
+  return path;
 }
