@@ -11,6 +11,7 @@ import {
 import * as cases from "jsr:@luca/cases@1";
 import {
   correctRepoInfo,
+  createWorkDir,
   fetchPrAndSetupBranch,
   fetchRepo,
   getExistingPR,
@@ -71,6 +72,7 @@ if (import.meta.main) {
           repoUser: repo.user,
           repoName: repo.name,
           branchName: existingPRBranchName,
+          commitMsg: "remvoe extension.json and cleanup",
         });
       }
     } else {
@@ -203,13 +205,4 @@ async function updateCleanup() {
   await Deno.writeTextFile("extension.toml", tomlFileNew);
   // console.log("new", Deno.readTextFileSync("extension.toml"));
   return tomlFileNew !== tomlFileOld;
-}
-
-function createWorkDir() {
-  const path = "./work";
-  try {
-    Deno.removeSync(path, { recursive: true });
-  } catch { /* ignore */ }
-  Deno.mkdirSync(path);
-  return path;
 }

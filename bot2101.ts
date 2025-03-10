@@ -57,6 +57,8 @@ if (import.meta.main) {
             repoUser: repo.user,
             repoName: repo.name,
             branchName: existingPRBranchName,
+            commitMsg:
+              "rename scrollbar_thumb.background to scrollbar.thumb.background",
           });
         } else {
           console.log(

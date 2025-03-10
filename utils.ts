@@ -313,10 +313,11 @@ export async function fetchPrAndSetupBranch(
 }
 
 export async function updatePr(
-  { repoUser, repoName, branchName }: {
+  { repoUser, repoName, branchName, commitMsg }: {
     repoUser: string;
     repoName: string;
     branchName: string;
+    commitMsg: string;
   },
 ) {
   using _ = switchDirTemp(repoName);
@@ -335,7 +336,7 @@ export async function updatePr(
     "git",
     "commit",
     "-m",
-    "rename scrollbar_thumb.background to scrollbar.thumb.background",
+    commitMsg,
   ]);
   if (!commitResult.success) {
     console.log("Nothing to commit, skipping PR creation");
