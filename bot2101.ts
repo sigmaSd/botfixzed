@@ -58,6 +58,10 @@ if (import.meta.main) {
             repoName: repo.name,
             branchName: existingPRBranchName,
           });
+        } else {
+          console.log(
+            `Skipping repo ${repo.user}/${repo.name} as there are no changes`,
+          );
         }
         return;
       }
@@ -80,7 +84,7 @@ if (import.meta.main) {
         });
       } else {
         console.log(
-          `Skipping repo ${repo.user}/${repo.name} as there is no changes`,
+          `Skipping repo ${repo.user}/${repo.name} as there are no changes`,
         );
       }
     });
