@@ -36,13 +36,27 @@ console.log(`Using GitHub username: ${username}`);
 
 for (let [index, repo] of repos.entries()) {
   console.log(`[${index++}] Processing repo: ${JSON.stringify(repo)}`);
+  if (repo.name === "aura-theme") {
+    console.log("Skipping repo as it is too big to clone");
+    continue;
+  }
   await tryUtilUserAction(async () => {
     // This is needed to handle repo renaming
     repo = await correctRepoInfo(repo);
-    if (await getExistingPR(repo.user, repo.name, username) !== null) {
-      console.log(
-        `Skipping repo ${repo.user}/${repo.name} as PR already exists`,
-      );
+
+    // This update logic is here because noticed after I sent PRs that there can be multiple theme files, though this is not common
+    const existingPRBranchName = await getExistingPR(
+      repo.user,
+      repo.name,
+      username,
+    );
+    if (existingPRBranchName !== null) {
+      // console.log(
+      //   `Skipping repo ${repo.user}/${repo.name} as PR already exists`,
+      // );
+      //
+      await fetchRepo(repo.repo);
+      await updatePr(repo, existingPRBranchName);
       return;
     }
 
@@ -123,31 +137,35 @@ async function getGitHubUsername() {
 
 function patchScrollbarThumbBg(repo: string) {
   Deno.chdir(repo);
-  const themePath = findTheme();
-  if (!themePath) {
-    throw new Error("Theme not found");
-  }
-  let theme = Deno.readTextFileSync(themePath);
-  if (!theme.includes("scrollbar_thumb.background")) {
-    Deno.chdir(tempDir);
-    return false;
-  }
-  theme = theme.replaceAll(
-    "scrollbar_thumb.background",
-    "scrollbar.thumb.background",
-  );
+  let changes = false;
 
-  // console.log(theme);
+  for (const themePath of findTheme()) {
+    let theme = Deno.readTextFileSync(themePath);
+    if (!theme.includes("scrollbar_thumb.background")) {
+      continue;
+    }
+    changes = true;
+    theme = theme.replaceAll(
+      "scrollbar_thumb.background",
+      "scrollbar.thumb.background",
+    );
 
-  Deno.writeTextFileSync(themePath, theme);
+    // console.log(theme);
+
+    Deno.writeTextFileSync(themePath, theme);
+  }
 
   Deno.chdir(tempDir);
-  return true;
+  if (changes) {
+    return true;
+  }
+  return false;
 }
-function findTheme() {
+
+function* findTheme() {
   for (const entry of Deno.readDirSync("themes")) {
     if (entry.name.endsWith(".json")) {
-      return `themes/${entry.name}`;
+      yield `themes/${entry.name}`;
     }
   }
 }
@@ -255,6 +273,74 @@ Bot script: https://github.com/sigmaSd/botfixzed/blob/master/bot2101.ts`,
     const prUrl = prResult.stdout.trim().split("\n")[0];
     console.log(`Pull request created: ${prUrl}`);
   }
+
+  // Return to the temp directory
+  Deno.chdir(tempDir);
+}
+
+async function updatePr(
+  { user, name }: { repo: string; user: string; name: string },
+  branchName: string,
+) {
+  console.log(`Updating PR for ${name}`);
+
+  // Change directory to the cloned repo
+  Deno.chdir(`${tempDir}/${name}`);
+
+  // Add a remote for *your* fork
+  await run([
+    "git",
+    "remote",
+    "add",
+    "fork",
+    `https://github.com/${username}/${name}.git`,
+  ]);
+
+  // Fetch from the fork to get the branch
+  await run(["git", "fetch", "fork"]);
+
+  // Checkout the existing branch
+  await run(["git", "checkout", `fork/${branchName}`]);
+  await run(["git", "checkout", "-b", branchName]);
+
+  // chdir hack (more then the usual hacks)
+  // TODO: remove all these chdir or use Dispose apis
+  Deno.chdir(tempDir);
+  const changed = patchScrollbarThumbBg(name);
+  Deno.chdir(name);
+
+  if (!changed) {
+    console.log("Nothing to commit, skipping PR update");
+    Deno.chdir(tempDir);
+    return;
+  }
+
+  // git diff
+  {
+    const { stdout, stderr } = await run(["git", "diff"]);
+    console.log(stdout, stderr);
+  }
+
+  // Add the changed files
+  await run(["git", "add", "."]);
+
+  // Commit the changes
+  const commitResult = await run([
+    "git",
+    "commit",
+    "-m",
+    "rename scrollbar_thumb.background to scrollbar.thumb.background",
+  ]);
+  if (!commitResult.success) {
+    console.log("Nothing to commit, skipping PR creation");
+    Deno.chdir(tempDir);
+    return;
+  }
+
+  // Push to the *fork* remote
+  await run(["git", "push", "-u", "fork", branchName]);
+
+  console.log(`Updated PR branch for ${user}/${name}`);
 
   // Return to the temp directory
   Deno.chdir(tempDir);
