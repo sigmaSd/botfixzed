@@ -197,7 +197,6 @@ export function switchDirTemp(dir: string) {
   Deno.chdir(dir);
   return {
     [Symbol.dispose]() {
-      console.log("called");
       Deno.chdir(originalDir);
     },
   };
