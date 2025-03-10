@@ -25,7 +25,7 @@ if (import.meta.main) {
   console.log(`Using GitHub botUsername: ${botUsername}`);
 
   for (let [index, repo] of repos.entries()) {
-    console.log(`[${index++}] Processing repo: ${JSON.stringify(repo)}`);
+    console.log(`[${index}] Processing repo: ${JSON.stringify(repo)}`);
     if (repo.name === "aura-theme") {
       console.log("Skipping repo as it is too big to clone");
       continue;
@@ -33,6 +33,7 @@ if (import.meta.main) {
     await retry(async () => {
       // This is needed to handle repo renaming
       repo = await correctRepoInfo(repo);
+      await fetchRepo(repo.repo);
 
       // This update logic is here because noticed after I sent PRs that there can be multiple theme files, though this is not common
       const existingPRBranchName = await getExistingPR(
@@ -45,7 +46,6 @@ if (import.meta.main) {
         //   `Skipping repo ${repo.user}/${repo.name} as PR already exists`,
         // );
         //
-        await fetchRepo(repo.repo);
         await fetchPrAndSetupBranch({
           repoName: repo.name,
           branchName: existingPRBranchName,
@@ -66,12 +66,12 @@ if (import.meta.main) {
         return;
       }
 
-      await fetchRepo(repo.repo);
       const changed = patchScrollbarThumbBg(repo.name);
       if (changed) {
         bumpVersion(repo.name);
         await openPR({
-          ...repo,
+          repoUser: repo.user,
+          repoName: repo.name,
           botUsername,
           commitMsg:
             "rename scrollbar_thumb.background to scrollbar.thumb.background",

@@ -203,10 +203,16 @@ export function switchDirTemp(dir: string) {
 }
 
 export async function openPR(
-  { user, name, botUsername: username, commitMsg, prTitle, prBody }: {
-    repo: string;
-    user: string;
-    name: string;
+  {
+    repoUser: user,
+    repoName: name,
+    botUsername: username,
+    commitMsg,
+    prTitle,
+    prBody,
+  }: {
+    repoUser: string;
+    repoName: string;
     botUsername: string;
     commitMsg: string;
     prTitle: string;
